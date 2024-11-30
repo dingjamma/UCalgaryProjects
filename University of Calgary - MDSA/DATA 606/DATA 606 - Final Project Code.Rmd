@@ -1,0 +1,866 @@
+---
+title: "Project 606"
+output: html_document
+date: "2024-06-12"
+---
+
+```{r Load Libraries}
+library(dplyr)
+library(ggplot2)
+library(MASS)
+library(tree)
+library(leaps)
+library(GGally)
+library(corrplot)
+library(DT)
+library(caret)
+```
+
+
+Load in the dataframes were pre-split into one dataframe to control all processes 
+```{r Load dataframes}
+# Load in both libraries 
+churn1 <- read.csv("churn-bigml-20.csv") 
+churn2 <- read.csv("churn-bigml-80.csv") 
+churn <- rbind(churn1, churn2)
+# print the dimensions of the data set
+dim(churn)
+
+# Verify there are no NA values in the dataset 
+NAs <- anyNA(churn)
+print(paste0('Rows which contain NA Values: ', NAs))
+
+# Verify there are no NA values in the dataset 
+duplicates <- anyDuplicated(churn)
+print(paste0('Number of duplicate rows: ', duplicates))
+```
+
+
+Remove State as this variable is categorical, and can be described in further detail with the area code 
+```{r Remove "State"}
+# Remove the state variable
+churn <- subset(churn, select = -State)
+```
+
+
+```{r Head}
+# Print the first 6 rows of data
+head(churn)
+```
+
+
+```{r Column Names}
+# List the names in the datafile 
+names(churn)
+```
+
+
+Change the Churn, voice mail and international plan variables to a boolean data type where true = 1 and false = 0
+```{r Convert Churn to boolean }
+# Convert character responses (yes/no, true/false) into boolean response 
+churn$Churn <- ifelse(churn$Churn, 1, 0)
+churn$Voice.mail.plan <- ifelse(churn$Voice.mail.plan == "Yes", 1, 0)
+churn$International.plan <- ifelse(churn$International.plan == "Yes", 1, 0)
+
+head(churn)
+```
+
+
+```{r Data Types}
+# Display data types using sapply() and class()
+sapply(churn, class)
+```
+
+
+```{r Memory Usage}
+# print the memory usage of the current datafile 
+object.size(churn)
+# Convert data types
+churn$Churn <- as.integer(churn$Churn)
+churn$Voice.mail.plan <- as.integer(churn$Voice.mail.plan)
+churn$International.plan <- as.integer(churn$International.plan)
+# Check the memory of the datafile after the data type conversion 
+object.size(churn)
+
+# By self managing the data types ourselves we can limit the memory used the storage of the data frame. By changing these variables to integers instead of doubles, memory decreased from 403232 bytes to 363248 bytes (39.984 kB memory saved). At this point this effort has minimal return, however if the data set was much larger, or if the entire telecom data was available then this concern would save a large amount of data 
+```
+
+
+```{r Split into training and testing datasets}
+# Sample the dataset into training and testing - 75/25
+set.seed (2023)
+train_idx <- sample(1:nrow(churn), 0.75 * nrow(churn))
+
+# Create training and test sets using the indices
+train <- churn[train_idx, ]
+# Use the matrix compliment 
+test <- churn[-train_idx, ]
+test_idx <- sample(1:nrow(churn), 0.25 * nrow(churn))
+test <- churn[test_idx, ]
+```
+
+
+```{r Create K-folds index}
+# 10 folds for cross-validation testing later 
+set.seed(2023)
+folds<-createFolds(churn$Churn, k=10)
+```
+
+
+Build a Linear Model 
+```{r Linear Model}
+# Simple linear model with alpha value of 0.05 
+# Manually removing variables one at a time with the least significance to the model until a final version is generated 
+lm.model = lm(Churn ~ International.plan + Voice.mail.plan + Total.day.charge + Total.eve.minutes +
+              Total.intl.calls + Customer.service.calls,
+              data = train)
+
+#summary(lm.model)
+
+# Apply the fitted linear regression model to the test set
+Prob.predict<-predict(lm.model,test,type="response")
+lm.predict=rep("0",length(test$Churn))
+lm.predict[Prob.predict>=0.5]="1"
+actual=test$Churn
+
+# Print the table of model output and actual cases from the testing dataset 
+table(lm.predict,actual)
+
+# Accuracy:
+correct.predictions <- sum(lm.predict == test$Churn)
+total.predictions <- length(test$Churn)
+linear.accuracy <- correct.predictions / total.predictions
+print(paste0("Accuracy of Linear Regression: ", linear.accuracy))
+
+# Confusion Matrix 
+plot(lm.model)
+confusionMatrix(as.factor(lm.predict), as.factor(actual))
+
+####
+# Accuracy for the training data set: 
+Prob.predict.train <- predict(lm.model,train,type="response")
+lm.predict.train=rep("0",length(train$Churn))
+lm.predict.train[Prob.predict.train>=0.5]="1"
+actual=train$Churn
+
+# Accuracy:
+correct.predictions.train <- sum(lm.predict.train == train$Churn)
+total.predictions.train <- length(train$Churn)
+linear.accuracy.training <- correct.predictions.train / total.predictions.train
+```
+
+
+Build a Logistic Model 
+```{r Logistic Model}
+# Logistic model with alpha value of 0.05 
+# Manually removing variables one at a time with the least significance to the model until a final version is generated 
+lg.model<-glm(Churn~ International.plan + Voice.mail.plan + Total.day.minutes + 
+              Total.eve.charge + Total.intl.minutes + Total.intl.calls + Customer.service.calls, 
+              family=binomial, 
+              data=train)
+
+# summary(lg.model)
+
+# Apply the fitted logistic regression model to the test set
+Prob.predict<-predict(lg.model,test,type="response")
+lg.predict=rep("0",length(test$Churn))
+lg.predict[Prob.predict>=0.5]="1"
+actual=test$Churn
+
+# Print the table of model output and actual cases from the testing dataset 
+table(lg.predict,actual)
+
+# Accuracy:
+correct.predictions <- sum(lg.predict == test$Churn)
+total.predictions <- length(test$Churn)
+logistic.accuracy <- correct.predictions / total.predictions
+print(paste0("Accuracy of Logistic Regression: ", logistic.accuracy))
+
+# Confusion Matrix 
+plot(lg.model)
+confusionMatrix(as.factor(lg.predict), as.factor(actual))
+
+
+####
+# Accuracy for the training data set: 
+Prob.predict.train <- predict(lg.model,train,type="response")
+lg.predict.train=rep("0",length(train$Churn))
+lg.predict.train[Prob.predict.train>=0.5]="1"
+actual=train$Churn
+
+# Accuracy:
+correct.predictions.train <- sum(lg.predict.train == train$Churn)
+total.predictions.train <- length(train$Churn)
+logistic.accuracy.training <- correct.predictions.train / total.predictions.train
+```
+
+
+Build a LDA Model 
+```{r LDA Model}
+# Create the LDA model
+lda.model <- lda(Churn ~ ., data = train)
+
+# Apply the LDA model and extract predictions 
+lda.pred.test <- predict(lda.model, test)
+lda.class.test <- lda.pred.test$class
+
+# Default predictions as 0
+lda.predict.test <- rep("0", length(test$Churn))
+
+# Assign "1" where class predictions are "1"
+lda.predict.test[lda.class.test == "1"] <- "1"
+
+# Actual values
+actual.test <- test$Churn
+
+# Print the table of model output and actual cases from the testing dataset
+table(lda.predict.test, actual.test)
+
+# Accuracy:
+correct.predictions.test <- sum(lda.predict.test == actual.test)
+total.predictions.test <- length(test$Churn)
+lda.accuracy <- correct.predictions.test / total.predictions.test
+print(paste0("Accuracy of LDA on Test Data: ", lda.accuracy))
+
+# Confusion Matrix
+confusionMatrix(as.factor(lda.predict.test), as.factor(actual.test))
+
+# Accuracy for the training data set:
+lda.pred.train <- predict(lda.model, train)
+
+# the LDA model and extract predictions
+lda.class.train <- lda.pred.train$class
+lda.predict.train <- rep("0", length(train$Churn))
+
+# Assign "1" where class predictions are "1"
+lda.predict.train[lda.class.train == "1"] <- "1"
+
+# Actual values from train set
+actual.train <- train$Churn
+
+# Accuracy:
+correct.predictions.train <- sum(lda.predict.train == actual.train)
+total.predictions.train <- length(train$Churn)
+lda.accuracy.train <- correct.predictions.train / total.predictions.train
+print(paste0("Accuracy of LDA on Training Data: ", lda.accuracy.train))
+```
+
+Build a QDA Model 
+```{r QDA Model}
+# Create the QDA model 
+qda.model <- qda(Churn ~ ., data = train)
+
+# Apply the LDA model and extract predictions 
+qda.pred.test <- predict(qda.model, test)
+qda.class.test <- qda.pred.test$class
+
+# Default predictions as 0
+qda.predict.test <- rep("0", length(test$Churn))
+
+# Assign "1" where class predictions are "1"
+qda.predict.test[qda.class.test == "1"] <- "1"
+
+# Actual values from test set
+actual.test <- test$Churn
+
+# Print the table of model output and actual cases from the testing dataset
+table(qda.predict.test, actual.test)
+
+# Accuracy:
+correct.predictions.test <- sum(qda.predict.test == actual.test)
+total.predictions.test <- length(test$Churn)
+qda.accuracy <- correct.predictions.test / total.predictions.test
+print(paste0("Accuracy of QDA on Test Data: ", qda.accuracy))
+
+# Confusion Matrix
+confusionMatrix(as.factor(qda.predict.test), as.factor(actual.test))
+
+# Accuracy for the training data set:
+qda.pred.train <- predict(qda.model, train)
+
+# Extract the class predictions
+qda.class.train <- qda.pred.train$class
+
+# Default predictions as 0
+qda.predict.train <- rep("0", length(train$Churn))
+
+# Assign "1" where class predictions are "1"
+qda.predict.train[qda.class.train == "1"] <- "1"
+
+# Actual values from train set
+actual.train <- train$Churn
+
+# Accuracy:
+correct.predictions.train <- sum(qda.predict.train == actual.train)
+total.predictions.train <- length(train$Churn)
+qda.accuracy.train <- correct.predictions.train / total.predictions.train
+print(paste0("Accuracy of QDA on Training Data: ", qda.accuracy.train))
+```
+
+Build a Regression Tree Model 
+```{r Regression Tree}
+# Churn as the response variable and all the other variables as predictors for the regression tree
+tree.model<-tree(Churn~., 
+                 data = train)
+
+# Summary of the tree
+summary(tree.model)
+```
+
+```{r Tree Plot}
+# Print the tree structure  
+plot(tree.model)
+text(tree.model ,pretty =0)
+```
+
+```{r 3.1: Cross-Validate for Termainal Node Number}
+#  cross-validation error and the size of the tree, select the “best” number of terminal nodes
+cv.rings=cv.tree(tree.model)
+plot(cv.rings$size,cv.rings$dev,type='b')
+
+# 13 terminal nodes? 
+```
+
+
+```{r Prune tree}
+# Prune the tree, plot the pruned tree
+prune.model=prune.tree(tree.model,best=13)
+#summary(prune.model)
+
+# Apply the fitted regression tree to the test set
+Prob.predict <- predict(prune.model, test, type = "vector")  
+prune.predict <- rep("0", length(test$Churn))
+prune.predict[as.numeric(Prob.predict) >= 0.5] <- "1"  
+actual <- test$Churn
+
+# Print the table of model output and actual cases from the testing dataset 
+table(prune.predict, actual)
+
+# Accuracy:
+correct.predictions <- sum(prune.predict == as.character(actual))
+total.predictions <- length(test$Churn)
+prune.accuracy <- correct.predictions / total.predictions
+print(paste0("Accuracy of Pruned Tree: ", prune.accuracy))
+
+# Confusion Matrix 
+confusionMatrix(as.factor(prune.predict), as.factor(actual))
+
+
+### 
+# Accuracy for the training data set: 
+# Apply the fitted regression tree to the training set
+Prob.predict.train <- predict(prune.model, train, type = "vector")  
+prune.predict.train <- rep("0", length(train$Churn))
+prune.predict.train[as.numeric(Prob.predict.train) >= 0.5] <- "1"  
+actual <- train$Churn
+
+# Accuracy:
+correct.predictions.train <- sum(prune.predict.train == as.character(actual.train))
+total.predictions.train <- length(train$Churn)
+prune.accuracy.train <- correct.predictions.train / total.predictions.train
+```
+
+
+```{r Prune Plot}
+# Print the tree structure  
+plot(prune.model)
+text(prune.model ,pretty =0)
+```
+
+
+```{r Accuracy Rates}
+# Create a dataframe to store the accuracy 
+
+accuracy_table <- data.frame(
+  Model = c("Linear Regression", "Logistic Regression", "LDA Regression", "QDA Regression", "Regression Tree"),
+  Training_Accuracy_Percentage = c(linear.accuracy.training, logistic.accuracy.training, lda.accuracy.train, 
+                                   qda.accuracy.train, prune.accuracy.train) * 100 ,
+  Testing_Accuracy_Percentage = c(linear.accuracy, logistic.accuracy, lda.accuracy, qda.accuracy, prune.accuracy) * 100
+)
+
+# Print the accuracy table summary for both training and testing data sets 
+datatable(accuracy_table, options = list(
+  pageLength = 5,
+  autoWidth = TRUE,
+  columnDefs = list(list(className = 'dt-center', targets = '_all')),
+  initComplete = JS(
+    "function(settings, json) {",
+    "$(this.api().table().header()).css({'font-weight': 'bold'});",
+    "$(this.api().table().body()).css({'font-weight': 'bold'});",
+    "}")
+))
+```
+
+```{r Cross-Validation}
+# Create storage for the computed accuracy results 
+lm.cv.train <- numeric(10)
+lm.cv.test <- numeric(10)
+lg.cv.train <- numeric(10)
+lg.cv.test <- numeric(10)
+lda.cv.train <- numeric(10)
+lda.cv.test <- numeric(10)
+qda.cv.train <- numeric(10)
+qda.cv.test <- numeric(10)
+prune.cv.train <- numeric(10)
+prune.cv.test <- numeric(10)
+for (i in 1:10) 
+  {
+      # Split the data into training and testing sets
+      # Source for splitting the data based on 20 folds:      
+      # https://stats.stackexchange.com/questions/61090/how-to-split-a-data-set-to-do-10-fold-cross-validation
+  
+  # Index each fold in the appropriate loop 
+  # Find the complement matrix to the fold loop for the testing data set
+  train_idx <- folds[[i]]
+  test_idx <- setdiff(seq_len(nrow(churn)), train_idx)
+  # Make the training data
+  train_data <- churn[train_idx, ]
+  # Make the complement matrix 
+  test_data <- churn[test_idx, ]
+  
+#--------------------------------- Linear 
+  #### Linear Regression Model 
+  # Simple linear model with alpha value of 0.05 
+  lm.model = lm(Churn ~ International.plan + Voice.mail.plan + Total.day.charge + Total.eve.minutes +
+                    Total.intl.calls + Total.intl.charge + Customer.service.calls,
+                    data = train_data)
+
+   # Accuracy for the training and testing data set: 
+  Prob.predict.test <- predict(lm.model,test_data,type="response")
+  lm.predict.test=rep("0",length(test_data$Churn))
+  lm.predict.test[Prob.predict.test>=0.5]="1"
+  actual.test=test$Churn
+  
+  Prob.predict.train <- predict(lm.model,train_data,type="response")
+  lm.predict.train=rep("0",length(train_data$Churn))
+  lm.predict.train[Prob.predict.train>=0.5]="1"
+  actual.train=train$Churn
+  
+  # Accuracy Train and test data set results 
+  correct.predictions.test <- sum(lm.predict.test == test_data$Churn)
+  total.predictions.test <- length(test_data$Churn)
+  lm.cv.test[i] <- correct.predictions.test / total.predictions.test
+  
+  correct.predictions.train <- sum(lm.predict.train == train_data$Churn)
+  total.predictions.train <- length(train_data$Churn)
+  lm.cv.train[i] <- correct.predictions.train / total.predictions.train
+  
+#--------------------------------- Logistic 
+  #### Logistic Regression Model 
+  lg.model<-glm(Churn~ International.plan + Voice.mail.plan + Number.vmail.messages + Total.day.minutes + 
+               Total.eve.charge + Total.intl.minutes + Total.intl.calls + Customer.service.calls, 
+               family=binomial, 
+               data=train_data)
+  
+  # Apply the fitted logistic regression model to the test and training set
+  Prob.predict.test<-predict(lg.model,test_data,type="response")
+  lg.predict.test=rep("0",length(test_data$Churn))
+  lg.predict.test[Prob.predict.test>=0.5]="1"
+  actual.test=test$Churn
+  
+  Prob.predict.train<-predict(lg.model,train_data,type="response")
+  lg.predict.train=rep("0",length(train_data$Churn))
+  lg.predict.train[Prob.predict.train>=0.5]="1"
+  actual.train=train_data$Churn
+
+  # Accuracy for the test and training data sets 
+  correct.predictions.test <- sum(lg.predict.test == test_data$Churn)
+  total.predictions.test <- length(test_data$Churn)
+  lg.cv.test[i] <- correct.predictions.test / total.predictions.test
+  
+  correct.predictions.train <- sum(lg.predict.train == train_data$Churn)
+  total.predictions.train <- length(train_data$Churn)
+  lg.cv.train[i] <- correct.predictions.train / total.predictions.train
+  
+  
+#--------------------------------- LDA
+  lda.model <- lda(Churn ~ ., data = train_data)
+
+  # Apply the fitted LDA model to the test set
+  lda.pred.test <- predict(lda.model, test_data)
+  lda.pred.train <- predict(lda.model, train_data)
+  
+  # Extract the class predictions
+  lda.class.test <- lda.pred.test$class
+  lda.class.train <- lda.pred.test$class
+  
+  # Default predictions with 0
+  lda.predict.test <- rep("0", length(test_data$Churn))
+  lda.predict.train <- rep("0", length(train_data$Churn))
+  
+  # Assign "1" where class predictions are "1"
+  lda.predict.test[lda.class.test == "1"] <- "1"
+  lda.predict.test[lda.class.train == "1"] <- "1"
+  
+  # Actual values from test set
+  actual.test <- test_data$Churn
+  actual.train <- train_data$Churn
+  
+  # Accuracy:
+  correct.predictions.test <- sum(lda.predict.test == actual.test)
+  total.predictions.test <- length(test_data$Churn)
+  lda.cv.test[i] <- correct.predictions.test / total.predictions.test
+  
+  correct.predictions.train <- sum(lda.predict.train == actual.train)
+  total.predictions.train <- length(train_data$Churn)
+  lda.cv.train[i] <- correct.predictions.train / total.predictions.train
+  
+ 
+  #--------------------------------- QDA
+  qda.model <- qda(Churn ~ ., data = train_data)
+
+  
+  # Apply the fitted QDA model to the test set
+  qda.pred.test <- predict(qda.model, test_data)
+  qda.pred.train <- predict(qda.model, train_data)
+  
+  # Extract the class predictions
+  qda.class.test <- qda.pred.test$class
+  qda.class.train <- qda.pred.train$class
+  
+  # Default predictions with 0
+  qda.predict.test <- rep("0", length(test_data$Churn))
+  qda.predict.train <- rep("0", length(train_data$Churn))
+  
+  # Assign "1" where class predictions are "1"
+  qda.predict.test[qda.class.test == "1"] <- "1"
+  qda.predict.train[qda.class.train == "1"] <- "1"
+  
+  # Actual values from test set
+  actual.test <- test_data$Churn
+  actual.train <- train_data$Churn
+
+  # Accuracy:
+  correct.predictions.test <- sum(qda.predict.test == actual.test)
+  total.predictions.test <- length(test_data$Churn)
+  qda.cv.test[i] <- correct.predictions.test / total.predictions.test
+  
+  correct.predictions.train <- sum(qda.predict.train == actual.train)
+  total.predictions.train <- length(train_data$Churn)
+  qda.cv.train[i] <- correct.predictions.train / total.predictions.train
+  
+#--------------------------------- Regression Tree Model
+    # Apply the fitted regression tree to the test and training data set
+  tree.model<-tree(Churn~., data = train)
+  prune.model=prune.tree(tree.model,best=13)
+    # Predict on the train and test data sets 
+  Prob.predict.test <- predict(prune.model, test_data, type = "vector")  
+  prune.predict.test <- rep("0", length(test_data$Churn))
+  prune.predict.test[as.numeric(Prob.predict.test) >= 0.5] <- "1"  
+  actual.test <- test_data$Churn
+  
+  Prob.predict.train <- predict(prune.model, train_data, type = "vector")  
+  prune.predict.train <- rep("0", length(train_data$Churn))
+  prune.predict.train[as.numeric(Prob.predict.train) >= 0.5] <- "1"  
+  actual.train <- train_data$Churn
+
+  # Accuracy:
+  correct.predictions.test <- sum(prune.predict.test == as.character(actual.test))
+  total.predictions.test <- length(test_data$Churn)
+  prune.cv.test[i] <- correct.predictions.test / total.predictions.test
+  
+  correct.predictions.train <- sum(prune.predict.train == as.character(actual.train))
+  total.predictions.train <- length(train_data$Churn)
+  prune.cv.train[i] <- correct.predictions.train / total.predictions.train
+}
+
+```
+
+
+```{r Average Cross-Validation Accuracy Rates}
+# Calculate the mean value for each fold 
+lm.train = mean(lm.cv.train)
+lm.test = mean(lm.cv.test)  
+lg.train = mean(lg.cv.train)
+lg.test = mean(lg.cv.test) 
+lda.train = mean(lda.cv.train)
+lda.test = mean(lda.cv.test) 
+qda.train = mean(qda.cv.train)
+qda.test = mean(qda.cv.test) 
+prune.train = mean(prune.cv.train)
+prune.test = mean(prune.cv.test) 
+
+# Create into a data frame 
+accuracy_table <- data.frame(
+  Model = c("Linear Regression", "Logistic Regression", "LDA Regression", "QDA Regression", "Regression Tree"),
+  Training_Accuracy_Percentage = c(lm.train, lg.train, lda.train, qda.train, prune.train) * 100 ,
+  Testing_Accuracy_Percentage = c(lm.test, lg.test, lda.test, qda.test, prune.test) * 100
+)
+
+# Print the accuracy table summary for both training and testing data sets 
+datatable(accuracy_table, options = list(
+  pageLength = 5,
+  autoWidth = TRUE,
+  columnDefs = list(list(className = 'dt-center', targets = '_all')),
+  initComplete = JS(
+    "function(settings, json) {",
+    "$(this.api().table().header()).css({'font-weight': 'bold'});",
+    "$(this.api().table().body()).css({'font-weight': 'bold'});",
+    "}")
+))
+```
+
+```{r Correlation Matrix}
+numerical_data <- churn %>%
+  select_if(is.numeric)
+
+# Compute the correlation matrix
+correlation_matrix <- cor(numerical_data)
+
+# Print the correlation matrix
+print(correlation_matrix)
+# Increase plot size
+par(mfrow=c(1, 1), mar=c(1, 1, 1, 1), oma=c(2, 2, 2, 2))
+
+# Visualize the correlation matrix with increased size
+# Visualize the correlation matrix
+corrplot(correlation_matrix, method = "color", tl.col = "black", tl.cex = 0.8)
+
+
+# Identify highly correlated pairs (|correlation| > 0.7)
+highly_correlated <- which(abs(correlation_matrix) > 0.7 & abs(correlation_matrix) < 1, arr.ind = TRUE)
+
+# Extract the pairs of highly correlated variables
+correlated_pairs <- data.frame(
+  Var1 = rownames(correlation_matrix)[highly_correlated[, 1]],
+  Var2 = colnames(correlation_matrix)[highly_correlated[, 2]],
+  Correlation = correlation_matrix[highly_correlated]
+)
+
+# Remove duplicate pairs
+correlated_pairs <- correlated_pairs[correlated_pairs$Var1 < correlated_pairs$Var2, ]
+
+# Print the highly correlated pairs
+print("Highly Correlated Pairs:")
+print(correlated_pairs)
+
+# Analyze these pairs further
+# Example: Scatter plots for highly correlated pairs
+library(ggplot2)
+
+for (i in 1:nrow(correlated_pairs)) {
+  var1 <- correlated_pairs$Var1[i]
+  var2 <- correlated_pairs$Var2[i]
+  plot <- ggplot(churn, aes_string(x = var1, y = var2)) +
+    geom_point() +
+    labs(title = paste("Scatter Plot of", var1, "vs", var2),
+         x = var1,
+         y = var2) +
+    theme_minimal()
+  print(plot)
+}
+
+```
+```{r Contingency Table}
+
+# Create contingency table for Churn vs. International plan
+contingency_table_international_plan <- table(churn$Churn, churn$International.plan)
+contingency_table_international_plan <- addmargins(contingency_table_international_plan)
+
+# Create contingency table for Churn vs. Voice mail plan
+contingency_table_voice_mail_plan <- table(churn$Churn, churn$Voice.mail.plan)
+contingency_table_voice_mail_plan <- addmargins(contingency_table_voice_mail_plan)
+
+# Print the contingency tables
+print("Contingency Table: Churn vs. International Plan")
+print(contingency_table_international_plan)
+chi_square_international_plan <- chisq.test(contingency_table_international_plan)
+print("Chi-square test result for Churn vs. International Plan:")
+print(chi_square_international_plan)
+
+
+print("Contingency Table: Churn vs. Voice Mail Plan")
+print(contingency_table_voice_mail_plan)
+# Perform Chi-square test on Churn vs. Voice mail plan
+chi_square_voice_mail_plan <- chisq.test(contingency_table_voice_mail_plan)
+print("Chi-square test result for Churn vs. Voice Mail Plan:")
+print(chi_square_voice_mail_plan)
+```
+
+```{r Key Churn Statistics}
+# Calculate the total charges
+churn$Total.charges <- churn$Total.day.charge + churn$Total.eve.charge + churn$Total.night.charge + churn$Total.intl.charge
+
+# Summarize key statistics
+summary(churn$Total.charges)
+
+# Create the boxplot for Total Charges
+ggplot(churn, aes(y = Total.charges)) +
+    geom_boxplot(fill = "lightblue", color = "darkblue", outlier.color = "red", outlier.size = 2) +
+    labs(title = "Boxplot of Total Charges", y = "Total Charges") +
+    theme_minimal()
+```
+
+```{r Data Distribution}
+# Ensure 'Churn' is a factor
+churn$Churn <- as.factor(churn$Churn)
+churn$International.plan <- as.factor(churn$International.plan)
+churn$Voice.mail.plan <- as.factor(churn$Voice.mail.plan)
+
+# Bar Plot: Count of customers who churned vs. those who did not
+ggplot(churn, aes(x = Churn)) +
+  geom_bar(fill = "steelblue") +
+  ggtitle("Count of Churned vs. Not Churned Customers") +
+  theme_minimal()
+
+# Bar Plot: Churn vs. International plan
+ggplot(churn, aes(x = International.plan, fill = Churn)) +
+  geom_bar(position = "dodge") +
+  ggtitle("Churn by International Plan") +
+  theme_minimal()
+
+# Bar Plot: Churn vs. Voice mail plan
+ggplot(churn, aes(x = Voice.mail.plan, fill = Churn)) +
+  geom_bar(position = "dodge") +
+  ggtitle("Churn by Voice Mail Plan") +
+  theme_minimal()
+
+# Histogram: Total day minutes for churned vs. not churned customers
+ggplot(churn, aes(x = Total.day.minutes, fill = Churn)) +
+  geom_histogram(position = "identity", alpha = 0.7, bins = 30) +
+  ggtitle("Distribution of Total Day Minutes by Churn") +
+  theme_minimal()
+
+# Box Plot: Customer service calls by churn
+ggplot(churn, aes(x = Churn, y = Customer.service.calls, fill = Churn)) +
+  geom_boxplot() +
+  ggtitle("Customer Service Calls by Churn") +
+  theme_minimal()
+```
+```{r}
+# Load necessary libraries
+library(car)
+library(lmtest)
+
+# Fit the linear model
+model <- lm(Churn ~ ., data = train)
+
+# Linearity: Residuals vs. Fitted Plot
+plot(model$fitted.values, residuals(model),
+     xlab = "Fitted Values",
+     ylab = "Residuals",
+     main = "Residuals vs. Fitted Values")
+abline(h = 0, col = "red")
+
+# Homoscedasticity: Breusch-Pagan test
+bptest(model)
+
+# Normality of Error Terms: Q-Q plot and Shapiro-Wilk test
+qqnorm(residuals(model))
+qqline(residuals(model), col = "red")
+shapiro.test(residuals(model))
+
+# Multicollinearity: Variance Inflation Factor (VIF)
+vif(model)
+
+# Influential Points and Outliers: Cook’s Distance and Leverage values
+plot(model, which = 4)
+plot(hatvalues(model),
+     main = "Leverage Values",
+     xlab = "Observation Index",
+     ylab = "Leverage")
+abline(h = 2 * mean(hatvalues(model)), col = "red")
+
+
+```
+```{r}
+# Install and load necessary packages
+library(MASS)
+library(caret)
+library(lmtest)
+
+# Fit a linear model (example)
+model <- lm(Churn ~ ., data = train)
+
+# Q-Q Plot
+qqnorm(residuals(model))
+qqline(residuals(model), col = "red")
+
+# Histogram of Residuals
+hist(residuals(model), breaks = 30, main = "Histogram of Residuals", xlab = "Residuals")
+
+# Shapiro-Wilk Test for Normality
+shapiro_test_result <- shapiro.test(residuals(model))
+print(shapiro_test_result)
+
+# Interpretation of Shapiro-Wilk Test
+if (shapiro_test_result$p.value < 0.05) {
+  print("The residuals are not normally distributed (reject H0).")
+} else {
+  print("The residuals are normally distributed (fail to reject H0).")
+}
+
+# Breusch-Pagan Test for Heteroscedasticity
+bptest_result <- bptest(model)
+print(bptest_result)
+
+# Interpretation of Breusch-Pagan Test
+if (bptest_result$p.value < 0.05) {
+  print("The test indicates heteroscedasticity (reject H0).")
+} else {
+  print("The test does not indicate heteroscedasticity (fail to reject H0).")
+}
+
+```
+
+```{r}
+# Install and load necessary packages
+library(MASS)
+library(caret)
+library(lmtest)
+
+# Fit a linear model (example)
+model <- lm(Churn ~ ., data = train)
+
+# Q-Q Plot
+qqnorm(residuals(model), main = "Q-Q Plot of Residuals")
+qqline(residuals(model), col = "red")
+
+# Histogram of Residuals
+hist(residuals(model), breaks = 30, main = "Histogram of Residuals", xlab = "Residuals")
+
+# Shapiro-Wilk Test for Normality
+shapiro_test_result <- shapiro.test(residuals(model))
+print(shapiro_test_result)
+
+# Interpretation of Shapiro-Wilk Test
+if (shapiro_test_result$p.value < 0.05) {
+  print("The residuals are not normally distributed (reject H0).")
+} else {
+  print("The residuals are normally distributed (fail to reject H0).")
+}
+
+# Breusch-Pagan Test for Heteroscedasticity
+bptest_result <- bptest(model)
+print(bptest_result)
+
+# Interpretation of Breusch-Pagan Test
+if (bptest_result$p.value < 0.05) {
+  print("The test indicates heteroscedasticity (reject H0).")
+} else {
+  print("The test does not indicate heteroscedasticity (fail to reject H0).")
+}
+
+```
+
+```{r}
+# Install and load necessary package
+library(car)
+
+# Fit the linear model
+model <- lm(Churn ~ ., data = train)
+
+# Calculate VIF for each predictor
+vif_values <- vif(model)
+print(vif_values)
+
+# Interpretation and Handling High VIF Values
+high_vif <- vif_values[vif_values > 5]
+if (length(high_vif) > 0) {
+  print("High VIF values detected. Consider removing or combining the following predictors:")
+  print(high_vif)
+} else {
+  print("No significant multicollinearity detected.")
+}
+
+```
